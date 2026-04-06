@@ -1,209 +1,158 @@
 from MemoryLevel import MemoryLevel
-import random
-from collections import OrderedDict
 
 class MemoryHierarchy:
-    def __init__(self, ssd_size, dram_size, l3_size, l2_size, l1_size, 
-                 replacement_policy="FIFO", bandwidth=1):
-        
+    def __init__(self, ssd_size, dram_size, l3_size, l2_size, l1_size):
         self.clock = 0
-        self.bandwidth = bandwidth
         
-        # Create memory levels with latencies
-        self.ssd = MemoryLevel("SSD", ssd_size, latency=10, bandwidth=bandwidth)
-        self.dram = MemoryLevel("DRAM", dram_size, latency=5, bandwidth=bandwidth)
-        self.l3 = MemoryLevel("L3", l3_size, latency=3, bandwidth=bandwidth)
-        self.l2 = MemoryLevel("L2", l2_size, latency=2, bandwidth=bandwidth)
-        self.l1 = MemoryLevel("L1", l1_size, latency=1, bandwidth=bandwidth)
+        # Create memory levels (largest to smallest)
+        self.ssd = MemoryLevel("SSD", ssd_size, latency=10)
+        self.dram = MemoryLevel("DRAM", dram_size, latency=5)
+        self.l3 = MemoryLevel("L3", l3_size, latency=3)
+        self.l2 = MemoryLevel("L2", l2_size, latency=2)
+        self.l1 = MemoryLevel("L1", l1_size, latency=1)
         
-        # Set replacement policy
-        for level in [self.l1, self.l2, self.l3]:
-            level.policy = replacement_policy
+        # Pending transfers queue
+        self.pending_transfers = []
         
-        self.hierarchy = [self.l1, self.l2, self.l3, self.dram, self.ssd]
-        self.pending_operations = []  # (data, current_level_idx, target_level_idx)
-        
-    def configure(self, ssd_size=None, dram_size=None, l3_size=None, l2_size=None, l1_size=None):
-        """Allow runtime reconfiguration"""
-        if ssd_size: self.ssd.size = ssd_size
-        if dram_size: self.dram.size = dram_size
-        if l3_size: self.l3.size = l3_size
-        if l2_size: self.l2.size = l2_size
-        if l1_size: self.l1.size = l1_size
-    
     def preload_ssd(self, instructions):
         """Preload SSD with instructions"""
         for instr in instructions:
             if len(self.ssd.storage) < self.ssd.size:
-                self.ssd.add_data(instr)
+                self.ssd.storage.append(instr)
+                self.ssd.storage_set.add(instr)
+        print(f"Preloaded {len(self.ssd.storage)} instructions into SSD")
     
-    def find_data_location(self, data):
-        """Find which level contains the data"""
-        if data in self.l1.storage_set:
-            return self.l1, 0
-        if data in self.l2.storage_set:
-            return self.l2, 1
-        if data in self.l3.storage_set:
-            return self.l3, 2
-        if data in self.dram.storage_set:
-            return self.dram, 3
-        if data in self.ssd.storage_set:
-            return self.ssd, 4
-        return None, -1
-    
-    def move_data_up(self, data, source_level, target_level, source_idx, target_idx):
-        """Move data up the hierarchy with latency"""
-        # Schedule transfers through intermediate levels
-        current = source_idx
-        while current > target_idx:
-            # Move from current level to next higher level
-            if current == 4:  # SSD to DRAM
-                next_level = self.dram
-                next_idx = 3
-                latency = self.ssd.latency
-            elif current == 3:  # DRAM to L3
-                next_level = self.l3
-                next_idx = 2
-                latency = self.dram.latency
-            elif current == 2:  # L3 to L2
-                next_level = self.l2
-                next_idx = 1
-                latency = self.l3.latency
-            elif current == 1:  # L2 to L1
-                next_level = self.l1
-                next_idx = 0
-                latency = self.l2.latency
-            
-            # Schedule the transfer
-            cycles_needed = (latency + self.bandwidth - 1) // self.bandwidth
-            self.pending_operations.append({
-                'data': data,
-                'from_level': current,
-                'to_level': next_idx,
-                'remaining_cycles': cycles_needed,
-                'source_obj': self.get_level_by_idx(current),
-                'target_obj': next_level
-            })
-            current = next_idx
+    def find_and_move_data(self, data):
+        """Find data in hierarchy and schedule its movement to L1"""
+        print(f"\n[Cycle {self.clock}] CPU requests instruction {data}")
         
-        return True
-    
-    def get_level_by_idx(self, idx):
-        """Get memory level object by index"""
-        return [self.l1, self.l2, self.l3, self.dram, self.ssd][idx]
-    
-    def fetch_instruction(self, instruction):
-        """Request an instruction (read operation)"""
-        print(f"\n[Cycle {self.clock}] CPU requests instruction {instruction}")
+        # Check each level from L1 down to SSD
+        if self.l1.check_and_record(data, True):
+            print(f"  Data already in L1! No movement needed.")
+            return True
         
-        # Find where the data is
-        location, idx = self.find_data_location(instruction)
+        if self.l2.check_and_record(data, True):
+            print(f"  Found in L2! Moving to L1...")
+            self.schedule_movement(data, self.l2, self.l1, self.l2.latency)
+            return True
         
-        if location:
-            # Data found at some level
-            print(f"  {location.name}: HIT for {instruction}")
-            location.hits += 1
-            
-            # If not in L1, need to move it up
-            if idx > 0:
-                self.move_data_up(instruction, location, self.l1, idx, 0)
-        else:
-            # Data not found anywhere (shouldn't happen if SSD is preloaded)
-            print(f"  ERROR: Instruction {instruction} not found in hierarchy!")
+        if self.l3.check_and_record(data, True):
+            print(f"  Found in L3! Moving to L2 then L1...")
+            self.schedule_movement(data, self.l3, self.l2, self.l3.latency)
+            self.schedule_movement(data, self.l2, self.l1, self.l2.latency)
+            return True
+        
+        if self.dram.check_and_record(data, True):
+            print(f"  Found in DRAM! Moving up through hierarchy...")
+            self.schedule_movement(data, self.dram, self.l3, self.dram.latency)
+            self.schedule_movement(data, self.l3, self.l2, self.l3.latency)
+            self.schedule_movement(data, self.l2, self.l1, self.l2.latency)
+            return True
+        
+        if self.ssd.check_and_record(data, True):
+            print(f"  Found in SSD! Moving up through entire hierarchy...")
+            # Schedule sequential movements: SSD→DRAM→L3→L2→L1
+            self.schedule_movement(data, self.ssd, self.dram, self.ssd.latency)
+            self.schedule_movement(data, self.dram, self.l3, self.dram.latency)
+            self.schedule_movement(data, self.l3, self.l2, self.l3.latency)
+            self.schedule_movement(data, self.l2, self.l1, self.l2.latency)
+            return True
+        
+        print(f"  ERROR: Data {data} not found in hierarchy!")
+        return False
     
-    def update_pending_operations(self):
-        """Process pending transfers with clock cycles"""
-        completed = []
-        
-        for op in self.pending_operations[:]:
-            op['remaining_cycles'] -= 1
-            
-            if op['remaining_cycles'] <= 0:
-                # Transfer complete
-                completed.append(op)
-                self.pending_operations.remove(op)
-                
-                # Add data to target level
-                op['target_obj'].add_data(op['data'], op['source_obj'].name)
-        
-        return completed
+    def schedule_movement(self, data, source, target, latency):
+        """Schedule a data movement between levels"""
+        self.pending_transfers.append({
+            'data': data,
+            'source': source,
+            'target': target,
+            'remaining': latency,
+            'total_latency': latency
+        })
+        print(f"    Scheduled: {data} from {source.name} → {target.name} (takes {latency} cycles)")
     
-    def run_clock_cycle(self):
-        """Advance the simulation by one clock cycle"""
+    def process_clock_cycle(self):
+        """Process one clock cycle - move data one step through pending transfers"""
         self.clock += 1
         print(f"\n=== CLOCK CYCLE {self.clock} ===")
         
-        # Process pending transfers
-        completed = self.update_pending_operations()
+        transfers_completed = []
         
-        # Report completed transfers
-        for op in completed:
-            print(f"  Transfer complete: {op['data']} now in {op['target_obj'].name}")
+        # Decrement remaining cycles for all pending transfers
+        for transfer in self.pending_transfers[:]:
+            transfer['remaining'] -= 1
+            
+            if transfer['remaining'] <= 0:
+                # Transfer complete!
+                transfers_completed.append(transfer)
+                self.pending_transfers.remove(transfer)
         
-        return completed
+        # Process completed transfers (add data to target)
+        for transfer in transfers_completed:
+            data = transfer['data']
+            source = transfer['source']
+            target = transfer['target']
+            
+            # Add to target level
+            if target.add_data(data, source.name):
+                pass
+        
+        return len(transfers_completed)
     
-    def run_requests(self, requests):
-        """Run a sequence of instruction requests"""
-        request_queue = list(requests)
+    def run_simulation(self, requests):
+        """Run the complete simulation"""
         request_idx = 0
+        total_requests = len(requests)
         
-        while request_idx < len(request_queue) or self.pending_operations:
-            # Issue new request if no pending operations or at start of cycle
-            if request_idx < len(request_queue) and len(self.pending_operations) < self.bandwidth * 2:
-                self.fetch_instruction(request_queue[request_idx])
+        while request_idx < total_requests or self.pending_transfers:
+            # Issue new request if no pending transfers (or at start)
+            if request_idx < total_requests and (not self.pending_transfers or self.clock == 0):
+                self.find_and_move_data(requests[request_idx])
                 request_idx += 1
             
-            # Advance clock
-            self.run_clock_cycle()
-            
-            # Small delay for readability
-            # input("Press Enter to continue...")
+            # Process one clock cycle
+            if self.pending_transfers or request_idx < total_requests:
+                self.process_clock_cycle()
     
-    def print_configuration(self):
-        """Print memory hierarchy configuration"""
-        print("\n" + "="*50)
+    def print_final_state(self):
+        """Print final state of all memory levels"""
+        print("\n" + "="*60)
+        print("FINAL MEMORY STATE")
+        print("="*60)
+        print(f"L1 Cache: {sorted(self.l1.storage)} (size: {len(self.l1.storage)}/{self.l1.size})")
+        print(f"L2 Cache: {sorted(self.l2.storage)} (size: {len(self.l2.storage)}/{self.l2.size})")
+        print(f"L3 Cache: {sorted(self.l3.storage)} (size: {len(self.l3.storage)}/{self.l3.size})")
+        print(f"DRAM:     {sorted(self.dram.storage)} (size: {len(self.dram.storage)}/{self.dram.size})")
+        print(f"SSD:      First 20: {sorted(self.ssd.storage)[:20]}... (total: {len(self.ssd.storage)})")
+        print("="*60)
+    
+    def print_stats(self):
+        """Print performance statistics"""
+        print("\n" + "="*60)
+        print("PERFORMANCE STATISTICS")
+        print("="*60)
+        
+        def calc_hit_rate(level):
+            total = level.hits + level.misses
+            return (level.hits/total)*100 if total > 0 else 0
+        
+        print(f"L1 Cache:  Hits={self.l1.hits}, Misses={self.l1.misses}, Hit Rate={calc_hit_rate(self.l1):.1f}%")
+        print(f"L2 Cache:  Hits={self.l2.hits}, Misses={self.l2.misses}, Hit Rate={calc_hit_rate(self.l2):.1f}%")
+        print(f"L3 Cache:  Hits={self.l3.hits}, Misses={self.l3.misses}, Hit Rate={calc_hit_rate(self.l3):.1f}%")
+        print(f"DRAM:      Hits={self.dram.hits}, Misses={self.dram.misses}")
+        print(f"SSD:       Hits={self.ssd.hits}, Misses={self.ssd.misses}")
+        print("="*60)
+    
+    def print_config(self):
+        """Print configuration"""
+        print("\n" + "="*60)
         print("MEMORY HIERARCHY CONFIGURATION")
-        print("="*50)
+        print("="*60)
         print(f"SSD:  {self.ssd.size} instructions (Latency: {self.ssd.latency} cycles)")
         print(f"DRAM: {self.dram.size} instructions (Latency: {self.dram.latency} cycles)")
         print(f"L3:   {self.l3.size} instructions (Latency: {self.l3.latency} cycles)")
         print(f"L2:   {self.l2.size} instructions (Latency: {self.l2.latency} cycles)")
         print(f"L1:   {self.l1.size} instructions (Latency: {self.l1.latency} cycles)")
-        print(f"Bandwidth: {self.bandwidth} instruction(s) per cycle")
-        print(f"Replacement Policy: {self.l1.policy}")
-        print("="*50)
-    
-    def print_final_state(self):
-        """Print final state of all memory levels"""
-        print("\n" + "="*50)
-        print("FINAL MEMORY STATE")
-        print("="*50)
-        print(f"L1 Cache: {sorted(self.l1.storage)}")
-        print(f"L2 Cache: {sorted(self.l2.storage)}")
-        print(f"L3 Cache: {sorted(self.l3.storage)}")
-        print(f"DRAM:     {sorted(self.dram.storage)}")
-        print(f"SSD:      {sorted(self.ssd.storage)}")
-        print("="*50)
-    
-    def print_stats(self):
-        """Print cache performance statistics"""
-        print("\n" + "="*50)
-        print("PERFORMANCE STATISTICS")
-        print("="*50)
-        print(f"L1 Cache: {self.l1.hits} hits, {self.l1.misses} misses, "
-              f"Hit Rate: {self.get_hit_rate(self.l1):.2%}")
-        print(f"L2 Cache: {self.l2.hits} hits, {self.l2.misses} misses, "
-              f"Hit Rate: {self.get_hit_rate(self.l2):.2%}")
-        print(f"L3 Cache: {self.l3.hits} hits, {self.l3.misses} misses, "
-              f"Hit Rate: {self.get_hit_rate(self.l3):.2%}")
-        print(f"DRAM:     {self.dram.hits} hits, {self.dram.misses} misses")
-        print(f"SSD:      {self.ssd.hits} hits, {self.ssd.misses} misses")
-        print("="*50)
-    
-    def get_hit_rate(self, level):
-        total = level.hits + level.misses
-        return level.hits / total if total > 0 else 0
-    
-    def print_movement_trace(self, instruction):
-        """Print data movement trace for an instruction"""
-        pass  # Implemented in fetch_instruction
+        print(f"Policy: {self.l1.policy}")
+        print("="*60)
