@@ -1,52 +1,51 @@
+# memory_hierarchy.py
+import random
+from collections import OrderedDict
 from MemoryLevel import MemoryLevel
-from readWriteLogic import fetch
+from MemoryHierarchy import MemoryHierarchy
 
-
-def printState(L1, L2, L3, dram, ssd):
-    print("\nFinal Memory State:")
-    print(f"L1 Cache: {L1.storage}")
-    print(f"L2 Cache: {L2.storage}")
-    print(f"L3 Cache: {L3.storage}")
-    print(f"DRAM: {dram.storage}")
-    print(f"SSD: {ssd.storage}")
-
-def printStats(L1, L2, L3, dram, ssd):
-    print("\nCache Performance Stats:")
-    print(f"L1 Cache: {L1.hits} hits, {L1.misses} misses")
-    print(f"L2 Cache: {L2.hits} hits, {L2.misses} misses")
-    print(f"L3 Cache: {L3.hits} hits, {L3.misses} misses")
-    print(f"DRAM: {dram.hits} hits, {dram.misses} misses")
-    print(f"SSD: {ssd.hits} hits, {ssd.misses} misses")
 
 def main():
-
-    """Setup"""
-    ssd = MemoryLevel("SSD", 100)
-    dram = MemoryLevel("DRAM", 50)
-    L3 = MemoryLevel("L3", 20)
-    L2 = MemoryLevel("L2", 10)
-    L1 = MemoryLevel("L1", 5)
-
-    hierarchy = [L1, L2, L3, dram, ssd]
-
-    """Preloading data into memory levels"""
-    ssd.storage = [i for i in range(100)]
-
-    #each number is a instruction being requested
-    requests = [3, 1, 6, 3]
-
-    clock = 0
-    for req in requests:
-        clock += 1
-        print(f"\n--- Clock Cycle {clock} ---")
-        fetch(req, L1, L2, L3, dram, ssd)
-
-
-    """"Final State and Stats"""
-    printState(L1, L2, L3, dram, ssd)
-    printStats(L1, L2, L3, dram, ssd)
-    """END OF MAIN"""    
-    pass
+    """Main function to run the memory hierarchy simulation"""
+    
+    # Configuration
+    SSD_SIZE = 100
+    DRAM_SIZE = 50
+    L3_SIZE = 20
+    L2_SIZE = 10
+    L1_SIZE = 5
+    REPLACEMENT_POLICY = "LRU"  # Options: "FIFO", "LRU", "Random"
+    BANDWIDTH = 1  # Instructions per cycle
+    
+    # Create memory hierarchy
+    memory = MemoryHierarchy(SSD_SIZE, DRAM_SIZE, L3_SIZE, L2_SIZE, L1_SIZE,
+                             replacement_policy=REPLACEMENT_POLICY,
+                             bandwidth=BANDWIDTH)
+    
+    # Print configuration
+    memory.print_configuration()
+    
+    # Preload SSD with instructions 0-99
+    memory.preload_ssd(list(range(100)))
+    
+    # Instruction access trace
+    # Modify this to test different access patterns
+    instruction_requests = [3, 1, 6, 3, 7, 3, 10, 3, 5, 8, 3, 6]
+    
+    print("\n" + "="*50)
+    print("INSTRUCTION ACCESS TRACE")
+    print("="*50)
+    print(f"Requests: {instruction_requests}")
+    print("="*50)
+    
+    # Run the simulation
+    memory.run_requests(instruction_requests)
+    
+    # Print final state and statistics
+    memory.print_final_state()
+    memory.print_stats()
+    
+    print("\nSimulation complete!")
 
 
 if __name__ == "__main__":
