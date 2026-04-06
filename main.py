@@ -1,4 +1,3 @@
-# memory_hierarchy.py
 import random
 from collections import OrderedDict
 from MemoryLevel import MemoryLevel
