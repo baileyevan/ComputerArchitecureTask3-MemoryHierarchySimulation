@@ -8,10 +8,10 @@ class MemoryLevel:
         self.latency = latency  # cycles per transfer
         self.bandwidth = bandwidth  # instructions per cycle
         self.storage = []  # list of instructions
-        self.storage_set = set()  # for O(1) lookup
+        self.storage_set = set() 
         self.hits = 0
         self.misses = 0
-        self.policy = "LRU"  # Changed to LRU for better performance
+        self.policy = "LRU"  # Options: "LRU", "FIFO", "Random"
         self.pending_transfers = []  # (data, source, target, remaining_cycles)
         
     def check_and_record(self, data, is_checking=True):
@@ -28,7 +28,7 @@ class MemoryLevel:
             return False
     
     def read(self, data):
-        """Original read method for compatibility"""
+        """Read method for compatibility"""
         if data in self.storage_set:
             self.hits += 1
             # Update LRU order if using LRU
@@ -41,7 +41,7 @@ class MemoryLevel:
             return False
     
     def add_data(self, data, source=None):
-        """Add data to this level (instant, for setup)"""
+        """Add data to this level"""
         if data not in self.storage_set:
             if len(self.storage) >= self.size:
                 self.evict()
