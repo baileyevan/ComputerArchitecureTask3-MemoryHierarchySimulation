@@ -9,10 +9,10 @@ the data movement across memory hierarchy.
 
 ## File Structure
 ```
-|---ComputerArchitecureTask3-MemoryHierarchy-|
-                                             |---main.py
-                                             |---MemoryLevel.py
-                                             |---MemoryHierarchy.py
+|---./ComputerArchitecureTask3-MemoryHierarchy-|
+                                               |---main.py
+                                               |---MemoryLevel.py
+                                               |---MemoryHierarchy.py
 ```
 
 ## Instructions
